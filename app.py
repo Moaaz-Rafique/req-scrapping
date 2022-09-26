@@ -1,29 +1,40 @@
-from email import header
-from gettext import gettext
-import sys
+from http import server
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
-import requests
-import csv
-import re
-import json
 import time
 from datetime import datetime
 import pandas as pd
+import tkinter as tk
+from tkinter import filedialog as fd
+from tkinter import ttk
+
+from tkinter.messagebox import showinfo
 
 
-def deEmojify(text):
-    regrex_pattern = re.compile(pattern="["
-                                u"\U0001F600-\U0001F64F"  # emoticons
-                                u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                                u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                                u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                                "]+", flags=re.UNICODE)
-    return regrex_pattern.sub(r'', text)
+keys=[
+        "Company Name Searched",
+        "Company Name Result",
+        "Numéro d'entreprise du Québec (NEQ)",
+        "Nom",
+        "Nom de famille",
+        "Prénom",
+        "Adresse"
+]
+column_names = {
+        "Company Name Searched":"Company Name Searched",
+        "Company Name Result":"Company Name Result",
+        "Numéro d'entreprise du Québec (NEQ)": "ID",
+        "Nom": "Company name",
+        "Nom de famille": "Owner Lastname",
+        "Prénom": "Owner Firstname",
+        "Adresse": "Address"
+}
 
 def getTableData(html):
     soup = BeautifulSoup(html, features="html.parser")
     tableSoup = soup.find("table", {"id": "CPH_K1ZoneContenu1_Cadr_IdSectionResultat_IdSectionResultat_K1DetailsRecherche_K1GrilleDetail"})
+    if not tableSoup:
+        return [], []
     header_soup = tableSoup.findAll('th')
     row_soup = tableSoup.findAll('tr')
 
@@ -43,10 +54,11 @@ def getTableData(html):
     # df.to_csv(f'Search_Res_for_{searchTerm}.csv')
     # print(df.info())
     print()
-    IDS = df[df["Statut"].str.contains("Immatriculée")==True]["Numéro de dossier"].values
-    return IDS
+    IDS = df[df["Statut"].str.contains("Immatriculée")==True]
+    return IDS["Numéro de dossier"].values, IDS["Nom"].values
 
 def getPageHtml(url, searchTerm, wait=0):
+    records=[]
     with sync_playwright() as p:
         browser = p.webkit.launch(headless=False)  #
         page = browser.new_page()
@@ -60,95 +72,105 @@ def getPageHtml(url, searchTerm, wait=0):
             '#CPH_K1ZoneContenu1_Cadr_IdSectionRechSimple_IdSectionRechSimple_KRBTRechSimple_btnRechercher').click()
         time.sleep(wait)  # uncomment to if network is slow
         html = page.content()        
-        IDsOfBusinesses = getTableData(html)
+        IDsOfBusinesses, Names = getTableData(html)        
         print(IDsOfBusinesses)
-        pages = []
-        for i in IDsOfBusinesses:
-            page.locator(f'text={i}').first.click()
+        for id in range(len(IDsOfBusinesses)):
+            page.locator(f'text={IDsOfBusinesses[id]}').first.click()
             time.sleep(wait)
-            pages.append(page.content())
+            html = page.content()
             page.locator(
             '#CPH_K1ZoneContenu1_Cadr_Section00_Section00_K1RubanBoutonsRetour_btnBoutonGenerique01').click()
-            
+            soup = BeautifulSoup(html, features="html.parser")
+            body_soup=soup.find("div", {"id":"CPH_K1ZoneContenu1_Cadr_K1ZoneContenu1_Cadr"})
+            record=dict()
+            record["Company Name Searched"] = searchTerm
+            record["Company Name Result"] = Names[id]
+            # record["Numéro d'entreprise du Québec (NEQ)"] = pages
+            for feild in body_soup.findAll("fieldset", {'class': "zonelibellechamp"}):        
+                span_soup=feild.findAll("textarea")
+                p_soup=feild.findAll("div",{"class": "composantform k1champsaisie validation"})
+                if p_soup:
+                    # print("="*100)
+                    # print(len(p_soup), len(span_soup))
+                    for i in range(len(p_soup)):
+                        # print(p_soup[i].find("span").get_text().strip())
+                        if p_soup[i].find("span").get_text().strip() in keys:
+                            try:
+                                record[p_soup[i].find("span").get_text().strip()]=span_soup[i].get_text().strip()
+                            except:            
+                                (p_soup[i].find("span").get_text().strip(),"-->","undefined")
+                        elif p_soup[i].find("span").get_text().strip():
+                            try:
+                                print(p_soup[i].find("span").get_text().strip(),"-->",span_soup[i].get_text().strip())
+                                # record[p_soup[i].find("span").get_text().strip()]=span_soup[i].get_text().strip()
+                            except:            
+                                (p_soup[i].find("span").get_text().strip(),"-->","undefined")
+            records.append(record)
     
-        # f = open("soup.txt", "a")
-        # f.write(pages[-1])
-        # f.close()
         browser.close()
-        return pages
-def findnth(string, substring, n):
-    parts = string.split(substring, n + 1)
-    if len(parts) <= n + 1:
-        return -1
-    return len(string) - len(parts[-1]) - len(substring)
+        return records
     
 
-records = []
 
 url = "https://www.registreentreprises.gouv.qc.ca/RQAnonymeGR/GR/GR03/GR03A2_19A_PIU_RechEnt_PC/PageRechSimple.aspx?T1.CodeService=S00436&Clng=F&WT.co_f=2f96b664f852fde3de71663982802426"
-searchTerm = 'valerie simon'
+searchTerm = input("Enter Search Term: ")
+
+records = getPageHtml(url, searchTerm, wait=3)
+
+root = tk.Tk()
+root.title('Tkinter Open File Dialog')
+root.resizable(False, False)
+root.geometry('300x150')
 
 
+def select_file():
+    filetypes = (
+        ('text files', '*.txt'),
+        ('All files', '*.*')
+    )
 
-#open and read the file after the appending:
-f = open("soup.html", "r")
-# print(f.read())
+    filename = fd.askopenfilename(
+        title='Open a file',
+        initialdir='/',
+        filetypes=filetypes)
 
-pages = [f.read()]
-pages = getPageHtml(url, searchTerm, wait=3)
+    showinfo(
+        title='Selected File',
+        message=filename
+    )
 
-keys=[
-        "Company Name Searched",
-        "Company Name Result",
-        "Numéro d'entreprise du Québec (NEQ)",
-        "Nom",
-        "Nom de famille",
-        "Prénom",
-        "Adresse"
-]
 
-column_names = {
-    "Numéro d'entreprise du Québec (NEQ)",
-        "Nom",
-        "Nom de famille",
-        "Prénom",
-        "Adresse"
-}
+# open button
 
-for page in pages:
-    print(len(page))
-    soup = BeautifulSoup(page, features="html.parser")
-    name_div = soup.findAll("div",{"class": "CPH_K1ZoneContenu1_Cadr_Section01_Section01_ctl04_ctl00_ctl00__cs"})
-    body_soup=soup.find("div", {"id":"CPH_K1ZoneContenu1_Cadr_K1ZoneContenu1_Cadr"})
-    record=dict()
-    # record["Numéro d'entreprise du Québec (NEQ)"] = pages
-    for feild in body_soup.findAll("fieldset", {'class': "zonelibellechamp"}):        
-        span_soup=feild.findAll("textarea")
-        p_soup=feild.findAll("div",{"class": "composantform k1champsaisie validation"})
-        if p_soup:
-            # print("="*100)
-            # print(len(p_soup), len(span_soup))
-            for i in range(len(p_soup)):
-                # print(p_soup[i].find("span").get_text().strip())
-                if p_soup[i].find("span").get_text().strip() in keys:
-                    try:
-                        record[p_soup[i].find("span").get_text().strip()]=span_soup[i].get_text().strip()
-                    except:            
-                        (p_soup[i].find("span").get_text().strip(),"-->","undefined")
-                elif p_soup[i].find("span").get_text().strip():
-                    try:
-                        print(p_soup[i].find("span").get_text().strip(),"-->",span_soup[i].get_text().strip())
-                        # record[p_soup[i].find("span").get_text().strip()]=span_soup[i].get_text().strip()
-                    except:            
-                        (p_soup[i].find("span").get_text().strip(),"-->","undefined")
+open_button = ttk.Button(
+    root,
+    text='Open a File',
+    command=select_file
+)
 
-    records.append(record)
-# print(records)
-# with open(f'Output_{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.csv', 'w', encoding="utf-8-sig", errors='surrogatepass', newline='') as output_file:
-#     dict_writer = csv.DictWriter(output_file, keys)
-#     dict_writer.writeheader()
-#     dict_writer.writerows(records)
+open_button.pack(expand=True)
 
-df = pd.DataFrame.from_records(records, )
-df.rename(columns=, inplace=True)
-df.to_csv("ot.csv",index=False)
+
+# run the application
+root.mainloop()
+
+filetypes = (
+        ('CSV files', '*.csv'),
+        ('All files', '*.*')
+    )
+
+filename = fd.askopenfilename(
+        title='Open a file',
+        initialdir='/',
+        filetypes=filetypes)
+
+showinfo(
+        title='Selected File',
+        message=filename
+)
+
+if len(records)<1:
+    print("No Bussiness records were found for this term")
+df = pd.DataFrame.from_records(records)
+df.rename(columns=column_names, inplace=True)
+df.to_csv(f'Output_{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.csv',index=False, mode='a')
