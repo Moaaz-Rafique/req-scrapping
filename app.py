@@ -1,13 +1,14 @@
+import os
 from http import server
+from turtle import width
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog as fd
+from tkinter import LEFT, TOP, X, OptionMenu, Radiobutton, StringVar, filedialog as fd
 from tkinter import ttk
-
 from tkinter.messagebox import showinfo
 
 
@@ -112,65 +113,90 @@ def getPageHtml(url, searchTerm, wait=0):
     
 
 
-url = "https://www.registreentreprises.gouv.qc.ca/RQAnonymeGR/GR/GR03/GR03A2_19A_PIU_RechEnt_PC/PageRechSimple.aspx?T1.CodeService=S00436&Clng=F&WT.co_f=2f96b664f852fde3de71663982802426"
-searchTerm = input("Enter Search Term: ")
-
-records = getPageHtml(url, searchTerm, wait=3)
 
 root = tk.Tk()
-root.title('Tkinter Open File Dialog')
-root.resizable(False, False)
+root.title('REQ')
+# root.resizable(False, False)
 root.geometry('300x150')
-
-
-def select_file():
+root.focus()
+csv_file = None
+def selected_column(v, dataframe, filename, btn, drop, open_btn):
+    btn.pack_forget()
+    drop.pack_forget()
+    v = list(dict.fromkeys(v))
+    url = "https://www.registreentreprises.gouv.qc.ca/RQAnonymeGR/GR/GR03/GR03A2_19A_PIU_RechEnt_PC/PageRechSimple.aspx?T1.CodeService=S00436&Clng=F&WT.co_f=2f96b664f852fde3de71663982802426"
+    records = []
+    for searchTerm in range(len(v)):
+        if v[searchTerm]:	
+            records += getPageHtml(url, v[searchTerm], wait=3)            
+    if len(records)<1:
+        print("No Bussiness records were found for this term")
+    df = pd.DataFrame.from_records(records)
+    df.rename(columns=column_names, inplace=True)
+    df.to_csv(f'Output_{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.csv',index=False)
+    open_btn.pack( expand=True )
+def select_file(csv_file, btn):
     filetypes = (
-        ('text files', '*.txt'),
+        ('text files', '*.csv'),
         ('All files', '*.*')
     )
 
     filename = fd.askopenfilename(
-        title='Open a file',
+        title='Select a csv',
         initialdir='/',
         filetypes=filetypes)
+    if filename:
+        showinfo(        
+            title='Selected File',
+            message=os.path.split(filename)[1]        
+        )
+    else:
+        showinfo(
+            title='Error',
+            message="File not loaded, Try again"
+        )
+    csv_file = pd.read_csv(filename)
+    # values = dict()
+    options = csv_file.keys()
+    # for i in range(len(csv_file.keys())):
+    #     # print(i, csv_file.keys()[i])
+    #     values[csv_file.keys()[i]] = csv_file.keys()[i]
 
-    showinfo(
-        title='Selected File',
-        message=filename
+    v = StringVar(root, csv_file.keys()[0])
+    
+    btn.pack_forget()
+    drop = OptionMenu( root , v , *options )
+    column_btn = ttk.Button(
+        root,
+        text='Select this column',
+        command=lambda: selected_column(csv_file[v.get()].values, csv_file, filename, column_btn, drop, btn)
     )
-
-
+    drop.pack(expand=True)
+    column_btn.pack(expand=True)
 # open button
+
+
 
 open_button = ttk.Button(
     root,
-    text='Open a File',
-    command=select_file
+    text='Select CSV',
+    command=lambda: select_file(csv_file, open_button)
 )
 
+
+# Loop is used to create multiple Radiobuttons
+# rather than creating each button separately
+
+
 open_button.pack(expand=True)
+ 
+
+
+
 
 
 # run the application
 root.mainloop()
 
-filetypes = (
-        ('CSV files', '*.csv'),
-        ('All files', '*.*')
-    )
 
-filename = fd.askopenfilename(
-        title='Open a file',
-        initialdir='/',
-        filetypes=filetypes)
 
-showinfo(
-        title='Selected File',
-        message=filename
-)
-
-if len(records)<1:
-    print("No Bussiness records were found for this term")
-df = pd.DataFrame.from_records(records)
-df.rename(columns=column_names, inplace=True)
-df.to_csv(f'Output_{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.csv',index=False, mode='a')
